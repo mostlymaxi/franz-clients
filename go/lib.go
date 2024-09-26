@@ -41,12 +41,9 @@ func NewProducer(addr string, topic string) (*Producer, error) {
 }
 
 func (p *Producer) Send(msg string) error {
-	_, err := p.raw.WriteString(msg)
-	if err != nil {
-		return err
-	}
-
-	err = p.raw.WriteByte('\n')
+	fmt.Printf("%s", msg)
+	_, err := p.raw.Write([]byte(msg))
+	_, err = p.raw.Write([]byte("\n"))
 
 	if err != nil {
 		return err
@@ -92,7 +89,6 @@ func NewConsumer(addr string, topic string) (*Consumer, error) {
 
 // TODO: add polling
 func (c *Consumer) Recv() (string, error) {
-	fmt.Printf("ping")
 	s, err := c.raw.ReadString('\n')
 	s = strings.TrimSuffix(s, "\n")
 
@@ -100,15 +96,11 @@ func (c *Consumer) Recv() (string, error) {
 }
 
 func main() {
-	p, _ := NewProducer("127.0.0.1:8085", "test")
-	err := p.Send("a")
+	p, err := NewProducer("127.0.0.1:8085", "test")
 	if err != nil {
-		fmt.Printf("%%", err)
-
+		fmt.Println("%s", err)
 	}
-	p.Send("b")
-	p.Send("cdef")
-
+	p.Send("a")
 	c, _ := NewConsumer("127.0.0.1:8085", "test")
 	s, _ := c.Recv()
 	fmt.Printf("%s", s)
