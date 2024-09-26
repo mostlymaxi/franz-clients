@@ -1,0 +1,21 @@
+[package]
+name = "franz-client"
+version = "0.1.0"
+edition = "2021"
+authors = ["Maxi Saparov <max.saparov@gmail.com>"]
+description = "client for franz server written in rust"
+documentation = "https://docs.rs/franz-client"
+homepage = "https://github.com/MostlyMaxi/franz-client"
+repository = "https://github.com/MostlyMaxi/franz-client"
+readme = "README.md"
+keywords = ["cli", "queue"]
+license = "MIT"
+categories = []
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+[dependencies]
+futures = "0.3.30"
+thiserror = "1.0.64"
+tokio = { version = "1.40.0", features = ["macros", "net"] }
+tokio-util = { version = "0.7.12", features = ["codec"] }
