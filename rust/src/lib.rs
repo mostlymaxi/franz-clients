@@ -1,6 +1,11 @@
+use std::time::Duration;
+
 use futures::{SinkExt, StreamExt};
-use tokio::net::{TcpSocket, TcpStream};
-use tokio_util::codec::{Framed, LinesCodec};
+use tokio::{
+    net::{tcp::OwnedReadHalf, TcpSocket, TcpStream},
+    time,
+};
+use tokio_util::codec::{Framed, FramedRead, FramedWrite, LinesCodec};
 
 #[derive(Copy, Clone)]
 #[repr(u8)]
@@ -52,20 +57,36 @@ impl FranzProducer {
 }
 
 pub struct FranzConsumer {
-    raw: Framed<TcpStream, LinesCodec>,
+    raw: FramedRead<OwnedReadHalf, LinesCodec>,
 }
 
 impl FranzConsumer {
     pub async fn new<S: AsRef<str>>(broker: S, topic: S) -> Result<Self, FranzClientError> {
         let s = TcpSocket::new_v4()?;
         let raw = s.connect(broker.as_ref().parse()?).await?;
+        let (raw_read, raw_write) = raw.into_split();
+
         let encoder = LinesCodec::new();
-        let mut raw = Framed::new(raw, encoder);
+        let mut framed_write = FramedWrite::new(raw_write, encoder.clone());
+        let framed_read = FramedRead::new(raw_read, encoder);
 
-        raw.feed(FranzClientKind::Consumer.as_str()).await?;
-        raw.send(topic).await?;
+        framed_write
+            .feed(FranzClientKind::Consumer.as_str())
+            .await?;
+        framed_write.send(topic).await?;
 
-        Ok(FranzConsumer { raw })
+        // KEEPALIVE
+        tokio::spawn(async move {
+            loop {
+                time::sleep(Duration::from_secs(60)).await;
+                match framed_write.send("PING").await {
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+            }
+        });
+
+        Ok(FranzConsumer { raw: framed_read })
     }
 
     pub async fn recv(&mut self) -> Option<Result<String, FranzClientError>> {
