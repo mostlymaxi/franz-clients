@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
@@ -7,6 +9,8 @@ use tokio::{
 };
 use tokio_util::codec::{Framed, FramedRead, FramedWrite, LinesCodec};
 
+/// An abstraction for the number we send to the server to set
+/// what we want our client to do
 #[derive(Copy, Clone)]
 #[repr(u8)]
 pub enum FranzClientKind {
@@ -23,6 +27,21 @@ impl FranzClientKind {
     }
 }
 
+/// A simple Franz Producer that sends messages to the broker.
+///
+/// Note: This producer does not use any internal buffering!
+///
+/// ```rust
+/// use franz_client::{ FranzClientError, FranzProducer };
+///
+/// # #[tokio::main]
+/// # async fn main() -> Result<(), FranzClientError> {
+/// let mut p = FranzProducer::new("127.0.0.1:8085", "test").await?;
+/// p.send("i was here! :3").await?;
+///
+/// # Ok(())
+/// # }
+/// ```
 pub struct FranzProducer {
     raw: Framed<TcpStream, LinesCodec>,
 }
@@ -56,6 +75,21 @@ impl FranzProducer {
     }
 }
 
+/// A simple Franz Consumer that receives messages from the broker
+///
+/// ```rust
+/// use franz_client::{ FranzClientError, FranzConsumer };
+///
+/// # #[tokio::main]
+/// # async fn main() -> Result<(), FranzClientError> {
+/// let mut c = FranzConsumer::new("127.0.0.1:8085", "test").await?;
+/// // returns None if there are no new messages
+/// // and errors on incorrectly formatted message
+/// let msg = c.recv().await.unwrap()?;
+///
+/// # Ok(())
+/// # }
+/// ```
 pub struct FranzConsumer {
     raw: FramedRead<OwnedReadHalf, LinesCodec>,
 }
