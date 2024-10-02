@@ -7,6 +7,9 @@ import (
 	"strings"
 )
 
+// TODO: This library is unfinished! D:
+
+// TODO: maybe find a way to close the original socket in a nice way :D
 type Producer struct {
 	raw *bufio.ReadWriter
 }
@@ -101,6 +104,9 @@ func main() {
 		fmt.Println("%s", err)
 	}
 	p.Send("a")
+	p.Send("b")
+	p.Send("cdef")
+
 	c, _ := NewConsumer("127.0.0.1:8085", "test")
 	s, _ := c.Recv()
 	fmt.Printf("%s", s)
