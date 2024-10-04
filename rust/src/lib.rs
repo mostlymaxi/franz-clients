@@ -59,7 +59,12 @@ pub enum FranzClientError {
 impl FranzProducer {
     pub async fn new<S: AsRef<str>>(broker: S, topic: S) -> Result<Self, FranzClientError> {
         let s = TcpSocket::new_v4()?;
-        let raw = s.connect(broker.as_ref().parse().unwrap()).await?;
+        let addr = tokio::net::lookup_host(broker.as_ref())
+            .await?
+            .next()
+            .unwrap();
+
+        let raw = s.connect(addr).await?;
         let encoder = LinesCodec::new();
         let mut raw = Framed::new(raw, encoder);
 
