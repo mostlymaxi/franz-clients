@@ -1,30 +1,19 @@
 #![doc = include_str!("../README.md")]
 
-use std::time::Duration;
-
-use futures::{SinkExt, StreamExt};
-use tokio::{
-    net::{tcp::OwnedReadHalf, TcpSocket, TcpStream},
-    time,
+use std::{
+    io::{BufRead, BufReader, BufWriter, Write},
+    net::{AddrParseError, TcpStream, ToSocketAddrs},
+    thread,
+    time::Duration,
 };
-use tokio_util::codec::{Framed, FramedRead, FramedWrite, LinesCodec};
+use strum::AsRefStr;
 
 /// An abstraction for the number we send to the server to set
 /// what we want our client to do
-#[derive(Copy, Clone)]
-#[repr(u8)]
-pub enum FranzClientKind {
-    Producer = 0,
-    Consumer = 1,
-}
-
-impl FranzClientKind {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Producer => "0",
-            Self::Consumer => "1",
-        }
-    }
+#[derive(AsRefStr, Copy, Clone)]
+pub enum Api {
+    Produce,
+    Consume,
 }
 
 /// A simple Franz Producer that sends messages to the broker.
@@ -42,8 +31,8 @@ impl FranzClientKind {
 /// # Ok(())
 /// # }
 /// ```
-pub struct FranzProducer {
-    raw: Framed<TcpStream, LinesCodec>,
+pub struct Producer {
+    inner: BufWriter<TcpStream>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -52,31 +41,46 @@ pub enum FranzClientError {
     AddrParseError(#[from] std::net::AddrParseError),
     #[error(transparent)]
     IoError(#[from] std::io::Error),
-    #[error(transparent)]
-    CodecError(#[from] tokio_util::codec::LinesCodecError),
 }
 
-impl FranzProducer {
-    pub async fn new<S: AsRef<str>>(broker: S, topic: S) -> Result<Self, FranzClientError> {
-        let s = TcpSocket::new_v4()?;
-        let addr = tokio::net::lookup_host(broker.as_ref())
-            .await?
+impl Producer {
+    pub fn new<S: AsRef<str>>(broker: S, topic: S) -> Result<Self, FranzClientError> {
+        let addr = broker
+            .as_ref()
+            .to_socket_addrs()?
+            // .filter(|a| a.is_ipv4() || a.is_ipv6())
             .next()
-            .unwrap();
+            .ok_or(std::io::Error::other("can't resolve socket addr"))?;
 
-        let raw = s.connect(addr).await?;
-        let encoder = LinesCodec::new();
-        let mut raw = Framed::new(raw, encoder);
+        let sock = TcpStream::connect(addr)?;
+        let mut sock = BufWriter::new(sock);
 
-        raw.feed(FranzClientKind::Producer.as_str()).await?;
-        raw.send(topic).await?;
+        let handshake = format!("version=1,topic={},api=produce", topic.as_ref());
 
-        Ok(FranzProducer { raw })
+        sock.write_all(&handshake.len().to_be_bytes())?;
+        sock.write_all(handshake.as_bytes())?;
+        sock.flush()?;
+
+        Ok(Producer { inner: sock })
     }
 
-    pub async fn send<S: AsRef<str>>(&mut self, msg: S) -> Result<(), FranzClientError> {
-        // Send str input + '\n'
-        Ok(self.raw.send(msg).await?)
+    pub fn send<D: AsRef<[u8]>>(&mut self, msg: D) -> Result<(), FranzClientError> {
+        // IF WE SEND MESSAGE THAT DOES NOT MATCH
+        // EXPECTED BYTES, WARN
+        self.inner.write_all(msg.as_ref())?;
+        self.inner.write_all(b"\n")?;
+
+        Ok(())
+    }
+
+    pub fn send_unbuffered<D: AsRef<[u8]>>(&mut self, msg: D) -> Result<(), FranzClientError> {
+        self.send(msg)?;
+        self.inner.flush()?;
+        Ok(())
+    }
+
+    pub fn flush(&mut self) -> Result<(), FranzClientError> {
+        Ok(self.inner.flush()?)
     }
 }
 
@@ -95,45 +99,53 @@ impl FranzProducer {
 /// # Ok(())
 /// # }
 /// ```
-pub struct FranzConsumer {
-    raw: FramedRead<OwnedReadHalf, LinesCodec>,
+pub struct Consumer {
+    inner: BufReader<TcpStream>,
 }
 
-impl FranzConsumer {
-    pub async fn new<S: AsRef<str>>(broker: S, topic: S) -> Result<Self, FranzClientError> {
-        let s = TcpSocket::new_v4()?;
-        let addr = tokio::net::lookup_host(broker.as_ref())
-            .await?
+impl Consumer {
+    pub fn new<S: AsRef<str>>(
+        broker: S,
+        topic: S,
+        group: Option<u16>,
+    ) -> Result<Self, FranzClientError> {
+        let addr = broker
+            .as_ref()
+            .to_socket_addrs()?
+            // .filter(|a| a.is_ipv4() || a.is_ipv6())
             .next()
-            .unwrap();
+            .ok_or(std::io::Error::other("can't resolve socket addr"))?;
 
-        let raw = s.connect(addr).await?;
-        let (raw_read, raw_write) = raw.into_split();
+        let sock = TcpStream::connect(addr)?;
+        let sock_c = sock.try_clone()?;
+        let mut sock = BufWriter::new(sock);
 
-        let encoder = LinesCodec::new();
-        let mut framed_write = FramedWrite::new(raw_write, encoder.clone());
-        let framed_read = FramedRead::new(raw_read, encoder);
+        let handshake = match group {
+            Some(g) => format!("version=1,topic={},group={},api=consume", topic.as_ref(), g),
+            None => format!("version=1,topic={},api=consume", topic.as_ref()),
+        };
 
-        framed_write
-            .feed(FranzClientKind::Consumer.as_str())
-            .await?;
-        framed_write.send(topic).await?;
+        sock.write_all(&handshake.len().to_be_bytes())?;
+        sock.write_all(handshake.as_bytes())?;
+        sock.flush()?;
 
         // KEEPALIVE
-        tokio::spawn(async move {
-            loop {
-                time::sleep(Duration::from_secs(60)).await;
-                match framed_write.send("PING").await {
-                    Ok(_) => {}
-                    Err(_) => break,
-                }
-            }
+        thread::spawn(move || loop {
+            sock.write_all(b"PING\n").unwrap();
+            sock.flush().unwrap();
+            thread::sleep(Duration::from_secs(60));
         });
 
-        Ok(FranzConsumer { raw: framed_read })
+        let inner = BufReader::new(sock_c);
+
+        Ok(Consumer { inner })
     }
 
-    pub async fn recv(&mut self) -> Option<Result<String, FranzClientError>> {
-        self.raw.next().await.map(|n| n.map_err(Into::into))
+    pub async fn recv(&mut self) -> Result<Vec<u8>, FranzClientError> {
+        // WE CAN READ EXPECTED BYTES FROM FRANZ
+        // AND ALLOCATE OUR BUFFER WITH THE EXPECTED BYTES
+        let mut buf = Vec::new();
+        self.inner.read_until(b'\n', &mut buf)?;
+        Ok(buf)
     }
 }
