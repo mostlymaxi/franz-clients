@@ -11,18 +11,9 @@ readme = "README.md"
 keywords = ["cli", "queue"]
 license = "MIT"
 categories = []
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 
 [dependencies]
-futures = "0.3.30"
-strum = { version = "0.26.3", features = ["derive"] }
 thiserror = "1.0.64"
-tokio = { version = "1.40.0", features = [
-	"macros",
-	"net",
-	"rt",
-	"rt-multi-thread",
-	"time",
-] }
-tokio-util = { version = "0.7.12", features = ["codec"] }
+
+[dev-dependencies]
+rand = "0.8.5"

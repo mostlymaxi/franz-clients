@@ -2,15 +2,14 @@
 
 use std::{
     io::{BufRead, BufReader, BufWriter, Write},
-    net::{AddrParseError, TcpStream, ToSocketAddrs},
+    net::{TcpStream, ToSocketAddrs},
     thread,
     time::Duration,
 };
-use strum::AsRefStr;
 
 /// An abstraction for the number we send to the server to set
 /// what we want our client to do
-#[derive(AsRefStr, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub enum Api {
     Produce,
     Consume,
@@ -20,16 +19,14 @@ pub enum Api {
 ///
 /// Note: This producer does not use any internal buffering!
 ///
-/// ```rust
-/// use franz_client::{ FranzClientError, FranzProducer };
+/// ```rust,ignore
+/// use franz_client::{Producer, FranzClientError};
 ///
-/// # #[tokio::main]
-/// # async fn main() -> Result<(), FranzClientError> {
-/// let mut p = FranzProducer::new("127.0.0.1:8085", "test").await?;
-/// p.send("i was here! :3").await?;
-///
-/// # Ok(())
-/// # }
+/// fn main() -> Result<(), FranzClientError> {
+///     let mut producer = Producer::new("127.0.0.1:8085", "test")?;
+///     producer.send_unbuffered("i was here! :3")?;
+///     producer.flush()
+/// }
 /// ```
 pub struct Producer {
     inner: BufWriter<TcpStream>,
@@ -43,23 +40,22 @@ pub enum FranzClientError {
     IoError(#[from] std::io::Error),
 }
 
-impl Producer {
-    pub fn new<S: AsRef<str>>(broker: S, topic: S) -> Result<Self, FranzClientError> {
-        let addr = broker
-            .as_ref()
-            .to_socket_addrs()?
-            // .filter(|a| a.is_ipv4() || a.is_ipv6())
-            .next()
-            .ok_or(std::io::Error::other("can't resolve socket addr"))?;
+fn send_handshake(
+    sock: &mut BufWriter<TcpStream>,
+    handshake: &str,
+) -> Result<(), FranzClientError> {
+    sock.write_all(&(handshake.len() as u32).to_be_bytes())?;
+    sock.write_all(handshake.as_bytes())?;
+    Ok(sock.flush()?)
+}
 
-        let sock = TcpStream::connect(addr)?;
+impl Producer {
+    pub fn new(broker: impl ToSocketAddrs, topic: &str) -> Result<Self, FranzClientError> {
+        let sock = TcpStream::connect(broker)?;
         let mut sock = BufWriter::new(sock);
 
-        let handshake = format!("version=1,topic={},api=produce", topic.as_ref());
-
-        sock.write_all(&handshake.len().to_be_bytes())?;
-        sock.write_all(handshake.as_bytes())?;
-        sock.flush()?;
+        let handshake = format!("version=1,topic={},api=produce", topic);
+        send_handshake(&mut sock, &handshake)?;
 
         Ok(Producer { inner: sock })
     }
@@ -86,48 +82,34 @@ impl Producer {
 
 /// A simple Franz Consumer that receives messages from the broker
 ///
-/// ```rust
-/// use franz_client::{ FranzClientError, FranzConsumer };
+/// ```rust,ignore
+/// use franz_client::{Consumer, FranzClientError};
 ///
-/// # #[tokio::main]
-/// # async fn main() -> Result<(), FranzClientError> {
-/// let mut c = FranzConsumer::new("127.0.0.1:8085", "test").await?;
-/// // returns None if there are no new messages
-/// // and errors on incorrectly formatted message
-/// let msg = c.recv().await.unwrap()?;
-///
-/// # Ok(())
-/// # }
+/// fn main() -> Result<(), FranzClientError> {
+///     let mut consumer = Consumer::new("127.0.0.1:8085", "test", None)?;
+///     let msg = consumer.recv()?;
+///     Ok(println!("{}", String::from_utf8_lossy(&msg)))
+/// }
 /// ```
 pub struct Consumer {
     inner: BufReader<TcpStream>,
 }
 
 impl Consumer {
-    pub fn new<S: AsRef<str>>(
-        broker: S,
-        topic: S,
+    pub fn new(
+        broker: impl ToSocketAddrs,
+        topic: &str,
         group: Option<u16>,
     ) -> Result<Self, FranzClientError> {
-        let addr = broker
-            .as_ref()
-            .to_socket_addrs()?
-            // .filter(|a| a.is_ipv4() || a.is_ipv6())
-            .next()
-            .ok_or(std::io::Error::other("can't resolve socket addr"))?;
-
-        let sock = TcpStream::connect(addr)?;
+        let sock = TcpStream::connect(broker)?;
         let sock_c = sock.try_clone()?;
         let mut sock = BufWriter::new(sock);
 
         let handshake = match group {
-            Some(g) => format!("version=1,topic={},group={},api=consume", topic.as_ref(), g),
-            None => format!("version=1,topic={},api=consume", topic.as_ref()),
+            Some(g) => format!("version=1,topic={},group={},api=consume", topic, g),
+            None => format!("version=1,topic={},api=consume", topic),
         };
-
-        sock.write_all(&handshake.len().to_be_bytes())?;
-        sock.write_all(handshake.as_bytes())?;
-        sock.flush()?;
+        send_handshake(&mut sock, &handshake)?;
 
         // KEEPALIVE
         thread::spawn(move || loop {
@@ -141,7 +123,7 @@ impl Consumer {
         Ok(Consumer { inner })
     }
 
-    pub async fn recv(&mut self) -> Result<Vec<u8>, FranzClientError> {
+    pub fn recv(&mut self) -> Result<Vec<u8>, FranzClientError> {
         // WE CAN READ EXPECTED BYTES FROM FRANZ
         // AND ALLOCATE OUR BUFFER WITH THE EXPECTED BYTES
         let mut buf = Vec::new();
