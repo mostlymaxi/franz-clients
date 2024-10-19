@@ -2,15 +2,14 @@
 
 use std::{
     io::{BufRead, BufReader, BufWriter, Write},
-    net::{AddrParseError, TcpStream, ToSocketAddrs},
+    net::{TcpStream, ToSocketAddrs},
     thread,
     time::Duration,
 };
-use strum::AsRefStr;
 
 /// An abstraction for the number we send to the server to set
 /// what we want our client to do
-#[derive(AsRefStr, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub enum Api {
     Produce,
     Consume,
@@ -57,7 +56,7 @@ impl Producer {
 
         let handshake = format!("version=1,topic={},api=produce", topic.as_ref());
 
-        sock.write_all(&handshake.len().to_be_bytes())?;
+        sock.write_all(&(handshake.len() as u32).to_be_bytes())?;
         sock.write_all(handshake.as_bytes())?;
         sock.flush()?;
 
@@ -125,7 +124,7 @@ impl Consumer {
             None => format!("version=1,topic={},api=consume", topic.as_ref()),
         };
 
-        sock.write_all(&handshake.len().to_be_bytes())?;
+        sock.write_all(&(handshake.len() as u32).to_be_bytes())?;
         sock.write_all(handshake.as_bytes())?;
         sock.flush()?;
 
@@ -141,7 +140,7 @@ impl Consumer {
         Ok(Consumer { inner })
     }
 
-    pub async fn recv(&mut self) -> Result<Vec<u8>, FranzClientError> {
+    pub fn recv(&mut self) -> Result<Vec<u8>, FranzClientError> {
         // WE CAN READ EXPECTED BYTES FROM FRANZ
         // AND ALLOCATE OUR BUFFER WITH THE EXPECTED BYTES
         let mut buf = Vec::new();
