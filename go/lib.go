@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"strings"
@@ -25,9 +26,11 @@ func NewProducer(addr string, topic string) (*Producer, error) {
 	buf_conn_rdr := bufio.NewReader(conn)
 	buf_conn := bufio.NewReadWriter(buf_conn_rdr, buf_conn_wtr)
 
-	_, err = buf_conn.Write([]byte("0\n"))
-	_, err = buf_conn.Write([]byte(topic))
-	_, err = buf_conn.Write([]byte("\n"))
+	header := fmt.Sprintf("version=1,api=produce,topic=%s", topic)
+	header_len := uint32(len(header))
+
+	err = binary.Write(buf_conn.Writer, binary.BigEndian, header_len)
+	_, err = buf_conn.Writer.Write([]byte(header))
 
 	if err != nil {
 		return nil, err
@@ -44,10 +47,18 @@ func NewProducer(addr string, topic string) (*Producer, error) {
 }
 
 func (p *Producer) Send(msg string) error {
-	fmt.Printf("%s", msg)
 	_, err := p.raw.Write([]byte(msg))
 	_, err = p.raw.Write([]byte("\n"))
 
+	if err != nil {
+		return err
+	}
+
+	return err
+}
+
+func (p *Producer) SendUnbuffered(msg string) error {
+	err := p.Send(msg)
 	if err != nil {
 		return err
 	}
@@ -72,9 +83,11 @@ func NewConsumer(addr string, topic string) (*Consumer, error) {
 	buf_conn_rdr := bufio.NewReader(conn)
 	buf_conn := bufio.NewReadWriter(buf_conn_rdr, buf_conn_wtr)
 
-	_, err = buf_conn.Write([]byte("1\n"))
-	_, err = buf_conn.Write([]byte(topic))
-	_, err = buf_conn.Write([]byte("\n"))
+	header := fmt.Sprintf("version=1,api=consume,topic=%s", topic)
+	header_len := uint32(len(header))
+
+	err = binary.Write(buf_conn.Writer, binary.BigEndian, header_len)
+	_, err = buf_conn.Writer.Write([]byte(header))
 
 	if err != nil {
 		return nil, err
@@ -90,7 +103,6 @@ func NewConsumer(addr string, topic string) (*Consumer, error) {
 
 }
 
-// TODO: add polling
 func (c *Consumer) Recv() (string, error) {
 	s, err := c.raw.ReadString('\n')
 	s = strings.TrimSuffix(s, "\n")
@@ -99,15 +111,14 @@ func (c *Consumer) Recv() (string, error) {
 }
 
 func main() {
-	p, err := NewProducer("127.0.0.1:8085", "test")
-	if err != nil {
-		fmt.Println("%s", err)
-	}
-	p.Send("a")
-	p.Send("b")
-	p.Send("cdef")
+	p, _ := NewProducer("127.0.0.1:8085", "test")
+
+	p.SendUnbuffered("a")
+	p.SendUnbuffered("b")
+	p.SendUnbuffered("cdef")
 
 	c, _ := NewConsumer("127.0.0.1:8085", "test")
+
 	s, _ := c.Recv()
 	fmt.Printf("%s", s)
 	s, _ = c.Recv()
