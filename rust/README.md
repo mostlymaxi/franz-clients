@@ -1,6 +1,18 @@
 # Franz Client
 
+## Protocol
+[message length : u32]([key]=[value] : utf8)
+
+#### mandatory keys
+- version
+- topic
+- api
+
+#### example key-values
+```version=1,topic=test_topic_name,api=produce```
+
 ## Example
+void franz_send(franz_producer_t tx, char *data, size_t len);
 
 This example assumes you have a franz server running on port 8085 bound to localhost.
 

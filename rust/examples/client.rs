@@ -22,7 +22,7 @@ fn main() -> Result<(), FranzClientError> {
     });
 
     let consumer_handle = thread::spawn(move || -> Result<(), FranzClientError> {
-        let mut consumer = Consumer::new(BROKER, TOPIC, None)?;
+        let mut consumer = Consumer::new(BROKER, TOPIC, Some(0))?;
         for _ in 0..NUM_MESSAGES {
             let msg = consumer.recv()?;
             let msg = String::from_utf8_lossy(&msg);
