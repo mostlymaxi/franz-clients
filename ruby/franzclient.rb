@@ -1,13 +1,18 @@
 require 'socket'
 
 class Consumer
-  def initialize(addr, port, topic)
+  def initialize(addr, port, topic, group = nil)
     sock = TCPSocket.new(addr, port)
-    header = "version=1,topic=#{topic},api=consume"
+    header = if group.nil?
+               "version=1,topic=#{topic},api=consume"
+             else
+               "version=1,topic=#{topic},group=#{group},api=consume"
+             end
     sock.write([header.bytesize].pack('N*'), header)
     sock.flush
 
     @keepalive = Thread.new do
+      sleep(15)
       loop do
         sock.write("PING\n")
         sock.flush
@@ -43,12 +48,7 @@ class Producer
   end
 end
 
-p = Producer.new('127.0.0.1', 8085, 'test')
-p.send_unbuffered 'a'
-p.send_unbuffered 'b'
-p.send_unbuffered 'asdf'
-
-c = Consumer.new('127.0.0.1', 8085, 'test')
+c = Consumer.new('127.0.0.1', 8085, 'test', 'groupma')
 puts c.recv
 puts c.recv
 puts c.recv
