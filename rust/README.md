@@ -11,6 +11,8 @@
 #### example key-values
 ```version=1,topic=test_topic_name,api=produce```
 
+```msg1\nmsg2\nmsg3\n```
+
 ## Example
 void franz_send(franz_producer_t tx, char *data, size_t len);
 
